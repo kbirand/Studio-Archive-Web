@@ -1,0 +1,17 @@
+{
+    "legacyWatch": true,
+    "pollingInterval": 20000,
+    "watch": [
+        "server",
+        ".env"
+    ],
+    "ext": "js,json",
+    "ignore": [
+        "client",
+        "node_modules",
+        "*.test.js",
+        "**/*.db",
+        "**/*.sqlite",
+        "**/*-journal"
+    ]
+}

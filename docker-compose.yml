@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  works-interface:
+    build: .
+    container_name: works-interface
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    environment:
+      - NODE_ENV=production
+      - PORT=3002
+      - PHOTO_ARCHIVE_PATH=/data/PhotoArchive
+      - JWT_SECRET=${JWT_SECRET:-your_super_secret_key_change_me}
+      - VITE_GOOGLE_CLIENT_ID=${VITE_GOOGLE_CLIENT_ID}
+    volumes:
+      # Mount your photo archive - adjust the left side to your NAS path
+      - /volume1/PhotoArchive:/data/PhotoArchive:ro
+      # Mount database files separately for persistence
+      - /volume1/PhotoArchive/works.db:/data/PhotoArchive/works.db
+      - /volume1/PhotoArchive/user_logs.db:/data/PhotoArchive/user_logs.db
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3002/api/works"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

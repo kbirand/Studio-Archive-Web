@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+:root {
+    /* Global Primary Color - Defaulting to Red to match slider */
+    --primary-color: #dc2626;
+    /* Tailwind red-600 */
+    --primary-hover: #b91c1c;
+    /* Tailwind red-700 */
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #444;
+}
+
+/* Custom Fonts - Helvetica Neue Family */
+.font-helvetica-ultra-light {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-weight: 100;
+}
+
+.font-helvetica-thin {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-weight: 200;
+}
+
+.font-helvetica-light {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-weight: 300;
+}
+
+.font-helvetica-roman {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-weight: 400;
+}
+
+.font-helvetica-medium {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-weight: 500;
+}
+
+.font-helvetica-bold {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-weight: 700;
+}
+
+.font-helvetica-heavy {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-weight: 900;
+}
+
+/* Dark mode native elements */
+input,
+select {
+    color-scheme: dark;
+}
+
+/* Hide default calendar icon for a cleaner look if desired, 
+   or just ensure it looks good with the theme */
+.inverse-calendar-icon::-webkit-calendar-picker-indicator {
+    filter: invert(0.5);
+    cursor: pointer;
+}
