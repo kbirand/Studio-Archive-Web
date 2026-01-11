@@ -4,7 +4,7 @@ A modern, full-stack web application for managing and browsing large photo archi
 
 ![Node.js](https://img.shields.io/badge/Node.js-20+-green.svg)
 ![React](https://img.shields.io/badge/React-18+-blue.svg)
-![SQLite](https://img.shields.io/badge/SQLite-3+-lightgrey.svg)
+![MySQL](https://img.shields.io/badge/MySQL-8.0+-blue.svg)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
@@ -52,7 +52,7 @@ A modern, full-stack web application for managing and browsing large photo archi
 - **Dark Theme** - Easy on the eyes for extended browsing sessions
 - **Lazy Loading** - Efficient loading of thumbnails as you scroll
 - **Real-time Updates** - Instant UI updates when making changes
-- **SQLite Database** - Lightweight, file-based database requiring no separate server
+- **MySQL Database** - Robust, production-ready relational database with full ACID compliance
 
 ## 🏗 Architecture
 
@@ -75,24 +75,21 @@ A modern, full-stack web application for managing and browsing large photo archi
 │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
 │                           │                                  │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │   JWT Auth  │  │   SQLite    │  │   Sharp (Images)    │  │
+│  │   JWT Auth  │  │    MySQL    │  │   Sharp (Images)    │  │
 │  │ Middleware  │  │  Database   │  │   Processing        │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
-└───────────────────────────┬─────────────────────────────────┘
+└───────────────────────────────────┬─────────────────────────┘
                             │
 ┌───────────────────────────┴─────────────────────────────────┐
-│                    File System Storage                       │
-│  ┌─────────────────────────────────────────────────────────┐│
-│  │  /PhotoArchive                                          ││
-│  │  ├── works.db          (SQLite database)                ││
-│  │  ├── user_logs.db      (Activity logs)                  ││
-│  │  ├── 000001_Project_Name/                               ││
-│  │  │   ├── image1.jpg                                     ││
-│  │  │   ├── image2.jpg                                     ││
-│  │  │   ├── thumbs/       (auto-generated)                 ││
-│  │  │   └── previews/     (auto-generated)                 ││
-│  │  └── 000002_Another_Project/                            ││
-│  └─────────────────────────────────────────────────────────┘│
+│                    Storage Layer                             │
+│  ┌────────────────────────┐  ┌──────────────────────────┐   │
+│  │      MySQL Server      │  │    File System Storage   │   │
+│  │  ┌──────────────────┐  │  │  /PhotoArchive           │   │
+│  │  │ works, files,    │  │  │  ├── 000001_Project/     │   │
+│  │  │ users, talents,  │  │  │  │   ├── image1.jpg      │   │
+│  │  │ user_logs tables │  │  │  │   ├── thumbs/         │   │
+│  │  └──────────────────┘  │  │  │   └── previews/       │   │
+│  └────────────────────────┘  │  └──────────────────────────┘│
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -101,6 +98,7 @@ A modern, full-stack web application for managing and browsing large photo archi
 ### For Local Development
 - **Node.js** 18.x or higher (20.x recommended)
 - **npm** 9.x or higher
+- **MySQL** 8.0 or higher (or MariaDB 10.5+)
 - **Python 3** (required for Sharp native compilation)
 - **Build tools** (for Sharp):
   - macOS: Xcode Command Line Tools (`xcode-select --install`)
@@ -110,10 +108,12 @@ A modern, full-stack web application for managing and browsing large photo archi
 ### For Docker Deployment
 - **Docker** 20.x or higher
 - **Docker Compose** 2.x or higher
+- **MySQL** 8.0+ (can be containerized or external)
 
 ### For Synology NAS
 - **DSM 7.0** or higher
 - **Container Manager** package installed
+- **MariaDB** package or external MySQL server
 - SSH access (recommended)
 
 ## 🚀 Installation
@@ -150,6 +150,12 @@ A modern, full-stack web application for managing and browsing large photo archi
    PHOTO_ARCHIVE_PATH=/path/to/your/photo/archive
    JWT_SECRET=your_super_secret_key_change_this
    VITE_GOOGLE_CLIENT_ID=your_google_oauth_client_id
+   
+   # MySQL Database Configuration
+   DB_HOST=127.0.0.1
+   DB_USER=your_mysql_username
+   DB_PASSWORD=your_mysql_password
+   DB_NAME=studioarchive
    ```
 
 6. **Create client environment file**
@@ -163,53 +169,41 @@ A modern, full-stack web application for managing and browsing large photo archi
    VITE_API_URL=http://localhost:3002
    ```
 
-7. **Initialize the database**
+7. **Set up MySQL database**
    
-   The application expects a SQLite database at `PHOTO_ARCHIVE_PATH/works.db`. If you don't have one, you'll need to create the schema:
+   First, create a database in MySQL:
+   ```bash
+   mysql -u root -p
+   ```
+   
+   Then run:
    ```sql
-   -- works table
-   CREATE TABLE works (
-       id INTEGER PRIMARY KEY AUTOINCREMENT,
-       path TEXT NOT NULL,
-       name TEXT NOT NULL,
-       ordered INTEGER DEFAULT 0,
-       visible INTEGER DEFAULT 1,
-       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-   );
-
-   -- files table
-   CREATE TABLE files (
-       id INTEGER PRIMARY KEY AUTOINCREMENT,
-       workid INTEGER NOT NULL,
-       file TEXT NOT NULL,
-       ordered INTEGER DEFAULT 0,
-       visible INTEGER DEFAULT 1,
-       FOREIGN KEY (workid) REFERENCES works(id)
-   );
-
-   -- users table
-   CREATE TABLE users (
-       id INTEGER PRIMARY KEY AUTOINCREMENT,
-       email TEXT UNIQUE NOT NULL,
-       username TEXT,
-       picture TEXT,
-       level INTEGER DEFAULT 0,
-       approved INTEGER DEFAULT 0,
-       preferences TEXT,
-       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-   );
+   CREATE DATABASE studioarchive CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+   CREATE USER 'studioarchive'@'localhost' IDENTIFIED BY 'your_password';
+   GRANT ALL PRIVILEGES ON studioarchive.* TO 'studioarchive'@'localhost';
+   FLUSH PRIVILEGES;
+   EXIT;
    ```
 
-8. **Start the development server**
+8. **Initialize the database schema**
+   
+   Run the provided schema file:
+   ```bash
+   mysql -u studioarchive -p studioarchive < server/sql/schema.sql
+   ```
+   
+   Or copy and execute the SQL from `server/sql/schema.sql` in your MySQL client.
+
+9. **Start the development server**
    ```bash
    npm run dev
    ```
 
    This starts both the backend (port 3002) and frontend (port 5173) concurrently.
 
-9. **Access the application**
+10. **Access the application**
    
-   Open your browser and navigate to: `http://localhost:5173`
+    Open your browser and navigate to: `http://localhost:5173`
 
 ### Docker Deployment
 
@@ -263,6 +257,10 @@ See [DOCKER_DEPLOY.md](DOCKER_DEPLOY.md) for detailed Synology-specific instruct
 | `PHOTO_ARCHIVE_PATH` | Absolute path to photo archive directory | **Yes** | - |
 | `JWT_SECRET` | Secret key for JWT token signing | **Yes** | - |
 | `VITE_GOOGLE_CLIENT_ID` | Google OAuth 2.0 Client ID | **Yes** | - |
+| `DB_HOST` | MySQL server hostname | No | `127.0.0.1` |
+| `DB_USER` | MySQL username | **Yes** | - |
+| `DB_PASSWORD` | MySQL password | **Yes** | - |
+| `DB_NAME` | MySQL database name | No | `studioarchive` |
 
 ### Google OAuth Setup
 
@@ -288,8 +286,6 @@ The application expects your photo archive to follow this structure:
 
 ```
 /PhotoArchive/
-├── works.db                    # SQLite database
-├── user_logs.db               # Activity logs database
 ├── 000001_Project_Name/       # Work folder (ID_Name format)
 │   ├── photo1.jpg             # Original images
 │   ├── photo2.jpg
@@ -452,10 +448,15 @@ works-interface/
 
 ### Common Issues
 
-#### "Cannot open database because the directory does not exist"
+#### "Error connecting to MySQL" or database connection errors
+- Verify MySQL server is running: `systemctl status mysql` (Linux) or check Services (Windows)
+- Check `DB_HOST`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME` in your `.env` file
+- Ensure the database exists: `mysql -u root -p -e "SHOW DATABASES;"`
+- Verify user permissions: `mysql -u your_user -p your_database -e "SELECT 1;"`
+
+#### "PHOTO_ARCHIVE_PATH does not exist"
 - Ensure `PHOTO_ARCHIVE_PATH` in `.env` points to an existing directory
 - Check that the path is absolute, not relative
-- Verify the `works.db` file exists in that directory
 
 #### Thumbnails not loading (404 errors)
 - Check that the server is running on the correct port
@@ -513,7 +514,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Sharp](https://sharp.pixelplumbing.com/) - Image processing
 - [dnd-kit](https://dndkit.com/) - Drag and drop
 - [Tailwind CSS](https://tailwindcss.com/) - Styling
-- [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) - SQLite driver
+- [mysql2](https://github.com/sidorares/node-mysql2) - MySQL driver
 
 ---
 
