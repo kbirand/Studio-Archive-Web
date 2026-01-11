@@ -16,9 +16,9 @@ router.use(optionalAuth);
 router.use(requireAdmin);
 
 // GET all users
-router.get('/users', (req, res) => {
+router.get('/users', async (req, res) => {
     try {
-        const users = db.prepare("SELECT id, username, email, level, approved, picture FROM users ORDER BY id DESC").all();
+        const users = await db.all("SELECT id, username, email, level, approved, picture FROM users ORDER BY id DESC");
         res.json(users);
     } catch (err) {
         console.error("Error fetching users:", err);
@@ -27,7 +27,7 @@ router.get('/users', (req, res) => {
 });
 
 // UPDATE user (approve/ban, change role)
-router.put('/users/:id', (req, res) => {
+router.put('/users/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const { level, approved } = req.body;
@@ -57,12 +57,12 @@ router.put('/users/:id', (req, res) => {
 
 
         // Fetch old user info for logging
-        const oldUser = db.prepare("SELECT * FROM users WHERE id = ?").get(id);
-        db.prepare(sql).run(...params);
+        const oldUser = await db.get("SELECT * FROM users WHERE id = ?", [id]);
+        await db.run(sql, params);
 
         // Fetch user info for logging
-        const targetUser = db.prepare("SELECT username, email FROM users WHERE id = ?").get(id);
-        if (targetUser) {
+        const targetUser = await db.get("SELECT username, email FROM users WHERE id = ?", [id]);
+        if (targetUser && oldUser) {
             if (approved === 1 && oldUser.approved !== 1) logEvent(req, 'USER APPROVED', `Approved user: ${targetUser.email || targetUser.username}`);
             if (approved === 0 && oldUser.approved !== 0) logEvent(req, 'USER BANNED', `Banned user: ${targetUser.email || targetUser.username}`);
             if (level && oldUser.level !== level) logEvent(req, 'USER LEVEL UPDATED', `Updated user ${targetUser.email || targetUser.username} level: "${oldUser.level}" -> "${level}"`);
@@ -77,15 +77,15 @@ router.put('/users/:id', (req, res) => {
 });
 
 // DELETE user
-router.delete('/users/:id', (req, res) => {
+router.delete('/users/:id', async (req, res) => {
     try {
         const { id } = req.params;
         if (parseInt(id) === req.user.id) {
             return res.status(400).json({ error: "Cannot delete yourself" });
         }
-        const targetUser = db.prepare("SELECT username, email FROM users WHERE id = ?").get(id);
+        const targetUser = await db.get("SELECT username, email FROM users WHERE id = ?", [id]);
 
-        db.prepare("DELETE FROM users WHERE id = ?").run(id);
+        await db.run("DELETE FROM users WHERE id = ?", [id]);
 
         if (targetUser) {
             logEvent(req, 'USER DELETED', `Deleted user: ${targetUser.email || targetUser.username}`);
@@ -101,11 +101,11 @@ router.delete('/users/:id', (req, res) => {
 // GET asset health status
 router.get('/assets/status', async (req, res) => {
     try {
-        const works = db.prepare("SELECT id, path, work_period, talent FROM works ORDER BY ordered DESC").all();
+        const works = await db.all("SELECT id, path, work_period, talent FROM works ORDER BY ordered DESC");
         const healthStatus = [];
 
         for (const work of works) {
-            const files = db.prepare("SELECT file FROM files WHERE workid = ?").all(work.id);
+            const files = await db.all("SELECT file FROM files WHERE workid = ?", [work.id]);
             const workDirPath = path.join(PHOTO_ARCHIVE_PATH, work.path);
             const previewDir = path.join(workDirPath, 'previews');
             const thumbDir = path.join(workDirPath, 'thumbs');
@@ -142,10 +142,10 @@ router.get('/assets/status', async (req, res) => {
 router.post('/assets/regenerate/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const work = db.prepare("SELECT path FROM works WHERE id = ?").get(id);
+        const work = await db.get("SELECT path FROM works WHERE id = ?", [id]);
         if (!work) return res.status(404).json({ error: "Work not found" });
 
-        const files = db.prepare("SELECT file FROM files WHERE workid = ?").all(id);
+        const files = await db.all("SELECT file FROM files WHERE workid = ?", [id]);
         const workDirPath = path.join(PHOTO_ARCHIVE_PATH, work.path);
         const previewDir = path.join(workDirPath, 'previews');
         const thumbDir = path.join(workDirPath, 'thumbs');
@@ -207,9 +207,9 @@ router.post('/assets/regenerate/:id', async (req, res) => {
 });
 
 // GET Activity Logs
-router.get('/logs', (req, res) => {
+router.get('/logs', async (req, res) => {
     try {
-        const logs = getLogs(req.query);
+        const logs = await getLogs(req.query);
         res.json(logs);
     } catch (err) {
         console.error("Error fetching logs:", err);
@@ -218,11 +218,11 @@ router.get('/logs', (req, res) => {
 });
 
 // EXPORT Activity Logs as CSV
-router.get('/logs/export', (req, res) => {
+router.get('/logs/export', async (req, res) => {
     try {
         // For export, we might want higher limit or no limit
         const exportFilters = { ...req.query, limit: 10000 };
-        const logs = getLogs(exportFilters);
+        const logs = await getLogs(exportFilters);
 
         // Generate CSV
         const headers = ["ID", "Timestamp", "User", "Action", "Description", "IP", "User Agent"];
@@ -248,9 +248,9 @@ router.get('/logs/export', (req, res) => {
 });
 
 // GET Log Categories (for filter)
-router.get('/logs/actions', (req, res) => {
+router.get('/logs/actions', async (req, res) => {
     try {
-        const actions = getActions();
+        const actions = await getActions();
         res.json(actions);
     } catch (err) {
         console.error("Error fetching log actions:", err);

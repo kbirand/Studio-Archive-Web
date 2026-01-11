@@ -4,6 +4,10 @@ import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from 
 import { arrayMove, SortableContext, rectSortingStrategy, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import AdminPanel from '../components/AdminPanel';
+import SidebarItem from '../components/SidebarItem';
+import WorkGridItem from '../components/WorkGridItem';
+import NewWorkModal from '../components/modals/NewWorkModal';
+import RenameModal from '../components/modals/RenameModal';
 
 const API_BASE = import.meta.env.PROD ? '' : (import.meta.env.VITE_API_URL || 'http://localhost:3002');
 
@@ -47,7 +51,7 @@ const Browser = () => {
     const [adminPanelTab, setAdminPanelTab] = useState('users');
     const [showAdminMenu, setShowAdminMenu] = useState(false);
     const [showNewWorkDialog, setShowNewWorkDialog] = useState(false);
-    const [newWorkName, setNewWorkName] = useState('');
+    // [REMOVED] newWorkName state
     const [uploading, setUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
     const [currentUploadFile, setCurrentUploadFile] = useState('');
@@ -108,7 +112,7 @@ const Browser = () => {
     const [activeModalWork, setActiveModalWork] = useState(null); // Persist work for modals
     const [showRenameModal, setShowRenameModal] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
-    const [renameValue, setRenameValue] = useState('');
+    // [REMOVED] renameValue state
 
     const handleContextMenu = (e, work) => {
         if (!user || user.level !== 'admin') return;
@@ -135,7 +139,6 @@ const Browser = () => {
 
     const handleRenameClick = () => {
         setActiveModalWork(contextMenu.work); // Save work for modal
-        setRenameValue(contextMenu.work?.work_period || '');
         setShowRenameModal(true);
     };
 
@@ -144,10 +147,10 @@ const Browser = () => {
         setShowDeleteModal(true);
     };
 
-    const submitRename = async () => {
-        if (!activeModalWork || !renameValue) return;
+    const submitRename = async (newName) => {
+        if (!activeModalWork || !newName) return;
         try {
-            await api.put(`/works/${activeModalWork.id}`, { work_period: renameValue });
+            await api.put(`/works/${activeModalWork.id}`, { work_period: newName });
 
             // Refresh local data
             setWorksData(prev => {
@@ -156,7 +159,7 @@ const Browser = () => {
             });
             await fetchWorks();
             if (selectedWorkId === activeModalWork.id) {
-                setWorkDetails(prev => ({ ...prev, work_period: renameValue }));
+                setWorkDetails(prev => ({ ...prev, work_period: newName }));
             }
 
             setShowRenameModal(false);
@@ -409,25 +412,51 @@ const Browser = () => {
         }
     };
 
-    const handleCreateWork = async () => {
-        if (!newWorkName.trim()) {
+    const handleCreateWork = async (name) => {
+        if (!name.trim()) {
             alert("Please enter a work name");
             return;
         }
 
         try {
-            const res = await api.post('/works/create', { name: newWorkName.trim() });
+            const res = await api.post('/works/create', { name: name.trim() });
             if (res.data.success) {
-                // Refresh works list
-                await fetchWorks();
-                // Select the new work
-                setSelectedWorkId(res.data.id);
-                // Close dialog and reset
+                const newWorkId = res.data.id;
+
+                // 1. Close dialog first to prevent stale state issues
                 setShowNewWorkDialog(false);
-                setNewWorkName('');
+
+                // 2. Force complete state reset BEFORE any other operations
+                // Using functional updates doesn't help here - we need synchronous clearing
+                setSelectedWorkId(null);
+                setWorkDetails(null);
+                setWorkFiles([]);
+                setIsSelectionMode(false);
+                setSelectedFiles(new Set());
+                setDetailLoading(true);
+
+                // 3. Refresh Sidebar List (Wait for it to complete)
+                await fetchWorks();
+
+                // 4. Now set the new work ID and fetch its details
+                // Important: Do NOT rely on handleWorkClick as it has its own async timing
+                setSelectedWorkId(newWorkId);
+
+                // 5. Fetch the new work details directly
+                const detailRes = await api.get(`/works/${newWorkId}`);
+
+                // 6. Double-check we're still on this work (user might have clicked elsewhere)
+                // Use direct ID check since we just set it
+                setWorkDetails(detailRes.data.work);
+                setWorkFiles(detailRes.data.files || []);
+                setDetailLoading(false);
             }
         } catch (err) {
             console.error("Failed to create work", err);
+            // Ensure clean state even on error
+            setDetailLoading(false);
+            setWorkDetails(null);
+            setWorkFiles([]);
             alert("Failed to create work: " + (err.response?.data?.error || err.message));
         }
     };
@@ -483,6 +512,17 @@ const Browser = () => {
             if (fileInputRef.current) fileInputRef.current.value = '';
             if (folderInputRef.current) folderInputRef.current.value = '';
         }
+    };
+
+    const handleDownloadOriginal = (e, file, workPath) => {
+        e.stopPropagation();
+        const url = `${API_BASE}/api/assets?path=${encodeURIComponent(workPath)}&file=${encodeURIComponent(file.file)}&type=original`;
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = file.file;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     };
 
     // --- EFFECTS ---
@@ -654,18 +694,27 @@ const Browser = () => {
             return;
         }
 
+        // CRITICAL: Reset old data FIRST to prevent stale content from showing
+        setWorkDetails(null);
+        setWorkFiles([]);
         setSelectedWorkId(workId);
         setIsSelectionMode(false);
         setSelectedFiles(new Set());
         setDetailLoading(true);
+
         try {
             const res = await api.get(`/works/${workId}${previewMode ? '?preview=1' : ''}`);
+            // Double-check the response is for the work we requested
+            // This prevents race conditions if user clicks rapidly
             setWorkDetails(res.data.work);
             // Enforce numeric sort by 'ordered' column just in case
             const sortedFiles = res.data.files.sort((a, b) => b.ordered - a.ordered);
             setWorkFiles(sortedFiles);
         } catch (err) {
             console.error("Failed to fetch work details", err);
+            // Clear on error to prevent stale data
+            setWorkDetails(null);
+            setWorkFiles([]);
         } finally {
             setDetailLoading(false);
         }
@@ -824,48 +873,31 @@ const Browser = () => {
                             >
                                 {filteredSidebarWorks.map(work => (
                                     <SortableWorkItem key={work.id} id={work.id}>
-                                        <button
-                                            onClick={() => handleWorkClick(work.id)}
-                                            onContextMenu={(e) => handleContextMenu(e, work)}
-                                            className={`w-full tracking-wide text-left px-5 py-2 text-lg font-helvetica-light transition-colors truncate cursor-grab active:cursor-grabbing
-                                                ${selectedWorkId === work.id ? 'bg-[#2a2a2a] text-white border-l-2 border-white' : 'text-gray-400 hover:text-gray-200 hover:bg-[#252525]'}`}
-                                        >
-                                            <div className="flex items-center justify-between w-full">
-                                                <span className="truncate flex-1">
-                                                    {work.work_period || work.talent || work.path}
-                                                </span>
-                                                {user && user.level === 'admin' && !previewMode && (
-                                                    <div
-                                                        onClick={(e) => handleToggleVisibility(e, work)}
-                                                        className={`ml-2 w-4 h-4 rounded border flex items-center justify-center cursor-pointer flex-shrink-0 transition-all ${work.visible === 1 ? 'bg-primary border-primary opacity-30' : 'bg-black/40 border-gray-400 hover:border-gray-200 opacity-10'}`}
-                                                        title={work.visible === 1 ? "Visible" : "Hidden"}
-                                                    >
-                                                        {work.visible === 1 && (
-                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-white" viewBox="0 0 20 20" fill="currentColor">
-                                                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                                            </svg>
-                                                        )}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </button>
+                                        <SidebarItem
+                                            work={work}
+                                            isSelected={selectedWorkId === work.id}
+                                            isAdmin={true}
+                                            previewMode={previewMode}
+                                            onSelect={handleWorkClick}
+                                            onContextMenu={handleContextMenu}
+                                            onToggleVisibility={handleToggleVisibility}
+                                        />
                                     </SortableWorkItem>
                                 ))}
                             </SortableContext>
                         </DndContext>
                     ) : (
                         filteredSidebarWorks.map(work => (
-                            <button
+                            <SidebarItem
                                 key={work.id}
-                                onClick={() => handleWorkClick(work.id)}
-                                onContextMenu={(e) => handleContextMenu(e, work)}
-                                className={`w-full tracking-wide text-left px-5 py-2 text-lg font-helvetica-light transition-colors truncate
-                                    ${selectedWorkId === work.id ? 'bg-[#2a2a2a] text-white border-l-2 border-white' : 'text-gray-400 hover:text-gray-200 hover:bg-[#252525]'}`}
-                            >
-                                <div className="flex items-center justify-between w-full">
-                                    <span className="truncate flex-1">{work.work_period || work.talent || work.path}</span>
-                                </div>
-                            </button>
+                                work={work}
+                                isSelected={selectedWorkId === work.id}
+                                isAdmin={false}
+                                previewMode={false}
+                                onSelect={handleWorkClick}
+                                onContextMenu={handleContextMenu}
+                                onToggleVisibility={handleToggleVisibility}
+                            />
                         ))
                     )}
                 </div>
@@ -1135,65 +1167,20 @@ const Browser = () => {
                                                         ratio={viewSettings.ratio}
                                                         onClick={() => handleThumbnailClick(file.id, idx)}
                                                     >
-                                                        <div className={`relative w-full h-full ${selectedFiles.has(file.id) ? 'ring-2 ring-primary' : ''}`}>
-                                                            <img
-                                                                src={`${API_BASE}/api/assets?path=${encodeURIComponent(workDetails.path)}&file=${encodeURIComponent(file.file)}&type=thumb`}
-                                                                alt={file.file}
-                                                                className={`w-full h-full object-cover pointer-events-none ${selectedFiles.has(file.id) ? 'opacity-80' : ''}`}
-                                                                loading="lazy"
-                                                            />
-                                                            {/* Checkbox Overlay */}
-                                                            {isSelectionMode && (
-                                                                <div className="absolute top-2 left-2 z-20">
-                                                                    <div className={`w-5 h-5 rounded border border-white/50 flex items-center justify-center ${selectedFiles.has(file.id) ? 'bg-primary border-primary' : 'bg-black/30'}`}>
-                                                                        {selectedFiles.has(file.id) && (
-                                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-white" viewBox="0 0 20 20" fill="currentColor">
-                                                                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                                                            </svg>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-                                                            )}
-
-                                                            {/* Admin Visibility Toggle (Files) */}
-                                                            {!isSelectionMode && !previewMode && (
-                                                                <div
-                                                                    className="absolute top-2 left-2 z-30 opacity-0 group-hover:opacity-100 transition-opacity"
-                                                                    onClick={(e) => handleToggleFileVisibility(e, file)}
-                                                                >
-                                                                    <div
-                                                                        className={`w-4 h-4 rounded flex items-center justify-center cursor-pointer transition-all border border-gray-800 ${file.visible === 1 ? 'bg-primary' : 'bg-gray-700 hover:bg-gray-600'}`}
-                                                                        title={file.visible === 1 ? "Visible" : "Hidden"}
-                                                                    >
-                                                                        {file.visible === 1 && (
-                                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="white" stroke="black" strokeWidth="1">
-                                                                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                                                            </svg>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-                                                            )}
-                                                            {!isSelectionMode && !previewMode && (
-                                                                <button
-                                                                    className="absolute top-2 right-2 p-1.5 bg-black/60 hover:bg-black/80 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                                                                    title="Download Original"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        const url = `${API_BASE}/api/assets?path=${encodeURIComponent(workDetails.path)}&file=${encodeURIComponent(file.file)}&type=original`;
-                                                                        const link = document.createElement('a');
-                                                                        link.href = url;
-                                                                        link.download = file.file;
-                                                                        document.body.appendChild(link);
-                                                                        link.click();
-                                                                        document.body.removeChild(link);
-                                                                    }}
-                                                                >
-                                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                                                    </svg>
-                                                                </button>
-                                                            )}
-                                                        </div>
+                                                        <WorkGridItem
+                                                            file={file}
+                                                            index={idx}
+                                                            isSelected={selectedFiles.has(file.id)}
+                                                            isSelectionMode={isSelectionMode}
+                                                            isAdmin={true}
+                                                            previewMode={previewMode}
+                                                            viewSettings={viewSettings}
+                                                            workPath={workDetails.path}
+                                                            apiBase={API_BASE}
+                                                            onClick={() => { }}
+                                                            onToggleVisibility={handleToggleFileVisibility}
+                                                            onDownloadOriginal={handleDownloadOriginal}
+                                                        />
                                                     </SortableItem>
                                                 ))}
                                             </SortableContext>
@@ -1213,46 +1200,20 @@ const Browser = () => {
                                                 className={`${viewSettings.ratio} bg-[#222] overflow-hidden rounded-md hover:brightness-110 transition-all relative group cursor-pointer`}
                                                 onClick={() => handleThumbnailClick(file.id, idx)}
                                             >
-                                                <div className={`relative w-full h-full ${selectedFiles.has(file.id) ? 'ring-2 ring-primary' : ''}`}>
-                                                    <img
-                                                        src={`${API_BASE}/api/assets?path=${encodeURIComponent(workDetails.path)}&file=${encodeURIComponent(file.file)}&type=thumb`}
-                                                        alt={file.file}
-                                                        className={`w-full h-full object-cover pointer-events-none ${selectedFiles.has(file.id) ? 'opacity-80' : ''}`}
-                                                        loading="lazy"
-                                                    />
-                                                    {/* Checkbox Overlay */}
-                                                    {isSelectionMode && (
-                                                        <div className="absolute top-2 left-2 z-20">
-                                                            <div className={`w-5 h-5 rounded border border-white/50 flex items-center justify-center ${selectedFiles.has(file.id) ? 'bg-primary border-primary' : 'bg-black/30'}`}>
-                                                                {selectedFiles.has(file.id) && (
-                                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-white" viewBox="0 0 20 20" fill="currentColor">
-                                                                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                                                                    </svg>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                    {!isSelectionMode && (
-                                                        <button
-                                                            className="absolute top-2 right-2 p-1.5 bg-black/60 hover:bg-black/80 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                                                            title="Download Original"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                const url = `${API_BASE}/api/assets?path=${encodeURIComponent(workDetails.path)}&file=${encodeURIComponent(file.file)}&type=original`;
-                                                                const link = document.createElement('a');
-                                                                link.href = url;
-                                                                link.download = file.file;
-                                                                document.body.appendChild(link);
-                                                                link.click();
-                                                                document.body.removeChild(link);
-                                                            }}
-                                                        >
-                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                                            </svg>
-                                                        </button>
-                                                    )}
-                                                </div>
+                                                <WorkGridItem
+                                                    file={file}
+                                                    index={idx}
+                                                    isSelected={selectedFiles.has(file.id)}
+                                                    isSelectionMode={isSelectionMode}
+                                                    isAdmin={false}
+                                                    previewMode={previewMode}
+                                                    viewSettings={viewSettings}
+                                                    workPath={workDetails.path}
+                                                    apiBase={API_BASE}
+                                                    onClick={() => { }}
+                                                    onToggleVisibility={handleToggleFileVisibility}
+                                                    onDownloadOriginal={handleDownloadOriginal}
+                                                />
                                             </div>
                                         ))}
                                     </div>
@@ -1382,71 +1343,18 @@ const Browser = () => {
                 )
             }
 
-            {/* Rename Modal */}
-            {
-                showRenameModal && (
-                    <div className="fixed inset-0 z-[110] bg-black/70 flex items-center justify-center p-4">
-                        <div className="bg-[#2a2a2a] border border-[#444] rounded-lg shadow-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
-                            <h3 className="text-xl font-light text-white mb-4">Rename Work</h3>
-                            <input
-                                type="text"
-                                className="w-full bg-[#1a1a1a] border border-[#444] text-white px-3 py-2 rounded focus:outline-none focus:border-red-500 mb-6"
-                                value={renameValue}
-                                onChange={e => setRenameValue(e.target.value)}
-                                autoFocus
-                            />
-                            <div className="flex justify-end gap-3">
-                                <button
-                                    onClick={() => setShowRenameModal(false)}
-                                    className="px-4 py-2 rounded text-gray-400 hover:text-white transition-colors"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={submitRename}
-                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors"
-                                >
-                                    Save
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )
-            }
+            <RenameModal
+                isOpen={showRenameModal}
+                onClose={() => { setShowRenameModal(false); setActiveModalWork(null); }}
+                onRename={submitRename}
+                initialValue={activeModalWork?.work_period || ''}
+            />
 
-            {/* New Work Modal */}
-            {
-                showNewWorkDialog && (
-                    <div className="fixed inset-0 z-[110] bg-black/70 flex items-center justify-center p-4" onClick={() => setShowNewWorkDialog(false)}>
-                        <div className="bg-[#2a2a2a] border border-[#444] rounded-lg shadow-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
-                            <h3 className="text-xl font-light text-white mb-4">New Work</h3>
-                            <input
-                                type="text"
-                                placeholder="Enter work name..."
-                                className="w-full bg-[#1a1a1a] border border-[#444] text-white px-3 py-2 rounded focus:outline-none focus:border-blue-500 mb-6"
-                                value={newWorkName}
-                                onChange={e => setNewWorkName(e.target.value)}
-                                onKeyDown={e => e.key === 'Enter' && handleCreateWork()}
-                                autoFocus
-                            />
-                            <div className="flex justify-end gap-3">
-                                <button
-                                    onClick={() => { setShowNewWorkDialog(false); setNewWorkName(''); }}
-                                    className="px-4 py-2 rounded text-gray-400 hover:text-white transition-colors"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={handleCreateWork}
-                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors"
-                                >
-                                    Create
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                )
-            }
+            <NewWorkModal
+                isOpen={showNewWorkDialog}
+                onClose={() => setShowNewWorkDialog(false)}
+                onCreate={handleCreateWork}
+            />
 
             {/* Delete Modal */}
             {

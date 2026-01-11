@@ -11,7 +11,9 @@ const PORT = process.env.PORT || 3000;
 
 app.set('trust proxy', true);
 
-app.use(cors());
+app.use(cors({
+    exposedHeaders: ['Server-Timing']
+}));
 app.use(express.json());
 
 // Routes
@@ -23,16 +25,19 @@ app.use('/api/admin', require('./routes/admin'));
 // Serve static files from React build in production
 if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.join(__dirname, '../client/dist')));
-    
+
     // Handle React routing - serve index.html for all non-API routes
-    app.get('*', (req, res) => {
+    // Use middleware instead of wildcard route for Express 5 compatibility
+    app.use((req, res, next) => {
         if (!req.path.startsWith('/api')) {
             res.sendFile(path.join(__dirname, '../client/dist/index.html'));
+        } else {
+            next();
         }
     });
 } else {
     app.get('/', (req, res) => {
-        res.send('Photo Archive API Running');
+        res.send('Photo Archive API Running - DEBUG MODE v2');
     });
 }
 

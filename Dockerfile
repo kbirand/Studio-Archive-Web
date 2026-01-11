@@ -1,5 +1,5 @@
 # Build stage for client
-FROM node:20-alpine AS client-builder
+FROM node:20-bookworm-slim AS client-builder
 
 WORKDIR /app/client
 
@@ -15,22 +15,20 @@ COPY client/ ./
 # Build client for production
 RUN npm run build
 
-# Production stage
-FROM node:20-alpine
+# Production stage - using Debian slim instead of Alpine for better Sharp compatibility
+FROM node:20-bookworm-slim
 
 WORKDIR /app
 
-# Install dependencies for sharp (image processing)
-RUN apk add --no-cache \
-    python3 \
-    make \
-    g++ \
-    vips-dev
+# Install runtime dependencies for sharp
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libvips42 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy server package files
 COPY package*.json ./
 
-# Install production dependencies only
+# Install production dependencies
 RUN npm ci --only=production
 
 # Copy server files

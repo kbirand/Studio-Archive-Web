@@ -1,24 +1,30 @@
-const Database = require('better-sqlite3');
-const path = require('path');
+const db = require('./db');
 
-const logsDbPath = path.join(process.env.PHOTO_ARCHIVE_PATH, 'user_logs.db');
-const logsDb = new Database(logsDbPath);
+// Create table if it doesn't exist (using the SAME connection as the app)
+// NOTE: Migration script already created it, but for safety/dev we can check.
+// Using async IIFE since we can't do top-level await easily in CommonJS without thinking
+const initLogger = async () => {
+    try {
+        await db.run(`
+        CREATE TABLE IF NOT EXISTS user_logs (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT,
+            username VARCHAR(255),
+            action VARCHAR(255),
+            action_desc TEXT,
+            ip_address VARCHAR(255),
+            user_agent TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+    } catch (err) {
+        console.error("Logger init error:", err);
+    }
+};
 
-// Create table if it doesn't exist (matching provided schema)
-logsDb.prepare(`
-    CREATE TABLE IF NOT EXISTS user_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        username TEXT,
-        action TEXT,
-        action_desc TEXT,
-        ip_address TEXT,
-        user_agent TEXT,
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-`).run();
+initLogger();
 
-const logEvent = (req, action, action_desc, userOverride = null) => {
+const logEvent = async (req, action, action_desc, userOverride = null) => {
     try {
         const user = userOverride || req.user;
         const user_id = user ? (user.id || user.userId) : null;
@@ -32,18 +38,17 @@ const logEvent = (req, action, action_desc, userOverride = null) => {
 
         const user_agent = (req.headers ? req.headers['user-agent'] : null) || 'unknown';
 
-        const stmt = logsDb.prepare(`
+        await db.run(`
             INSERT INTO user_logs (user_id, username, action, action_desc, ip_address, user_agent)
             VALUES (?, ?, ?, ?, ?, ?)
-        `);
+        `, [user_id, username, action, action_desc, ip_address, user_agent]);
 
-        stmt.run(user_id, username, action, action_desc, ip_address, user_agent);
     } catch (err) {
         console.error("Failed to log event:", err);
     }
 };
 
-const getLogs = (filters = {}) => {
+const getLogs = async (filters = {}) => {
     try {
         const { q, action, timeframe, startDate, endDate, limit = 500 } = filters;
         let query = "SELECT * FROM user_logs";
@@ -60,11 +65,11 @@ const getLogs = (filters = {}) => {
         }
         if (timeframe && timeframe !== 'custom') {
             if (timeframe === 'today') {
-                where.push("timestamp >= date('now')");
+                where.push("timestamp >= CURDATE()");
             } else if (timeframe === '7d') {
-                where.push("timestamp >= date('now', '-7 days')");
+                where.push("timestamp >= DATE_SUB(NOW(), INTERVAL 7 DAY)");
             } else if (timeframe === '30d') {
-                where.push("timestamp >= date('now', '-30 days')");
+                where.push("timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)");
             }
         } else if (timeframe === 'custom') {
             if (startDate) {
@@ -73,7 +78,7 @@ const getLogs = (filters = {}) => {
             }
             if (endDate) {
                 where.push("timestamp <= ?");
-                // End date usually means the end of that day, so we add 23:59:59 or use date() comparison
+                // End date usually means the end of that day
                 params.push(endDate + " 23:59:59");
             }
         }
@@ -84,19 +89,20 @@ const getLogs = (filters = {}) => {
 
         query += " ORDER BY timestamp DESC";
         if (limit) {
-            query += ` LIMIT ${limit}`;
+            query += ` LIMIT ${limit}`; // Be careful with direct interpolation, but limit is usually safe if ensured number
         }
 
-        return logsDb.prepare(query).all(...params);
+        return await db.all(query, params);
     } catch (err) {
         console.error("Failed to fetch logs:", err);
         return [];
     }
 };
 
-const getActions = () => {
+const getActions = async () => {
     try {
-        return logsDb.prepare("SELECT DISTINCT action FROM user_logs ORDER BY action ASC").all().map(a => a.action);
+        const rows = await db.all("SELECT DISTINCT action FROM user_logs ORDER BY action ASC");
+        return rows.map(a => a.action);
     } catch (err) {
         console.error("Failed to fetch actions:", err);
         return [];

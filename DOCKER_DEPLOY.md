@@ -4,13 +4,13 @@
 - Synology NAS with Docker package installed (Container Manager)
 - SSH access to your NAS
 - Your photo archive copied to the NAS
+- **MySQL Database** (MariaDB package on Synology or external)
 
 ## Directory Structure on NAS
 ```
 /volume1/
 ├── PhotoArchive/          # Your photo archive (00_PhotoArchive contents)
-│   ├── works.db
-│   ├── user_logs.db
+├── PhotoArchive/          # Your photo archive (00_PhotoArchive contents)
 │   ├── 000001_All_06-07/
 │   ├── 000003_Boyner_SS07/
 │   └── ...
@@ -47,16 +47,25 @@ NODE_ENV=production
 PHOTO_ARCHIVE_PATH=/data/PhotoArchive
 JWT_SECRET=your_super_secret_key_change_this_to_something_random
 VITE_GOOGLE_CLIENT_ID=your_google_client_id
+
+# Database Settings
+DB_HOST=192.168.1.50   # REPLACE WITH YOUR NAS IP
+DB_USER=root
+DB_PASSWORD=your_mysql_password
+DB_NAME=studioarchive
 ```
 
 ### 3. Update docker-compose.yml paths
-Edit `docker-compose.yml` and adjust the volume paths to match your NAS structure:
+Edit `docker-compose.yml` and adjust the volume paths. 
+
+**Note on Networking:** The configuration uses `network_mode: "host"`. This means the application shares the network IP of your NAS directly.
+-   `DB_HOST=127.0.0.1` will work because "localhost" is now the NAS itself.
+-   The app will bind directly to port `3002` on your NAS.
+
 ```yaml
 volumes:
-  # Change /volume1/PhotoArchive to your actual photo archive path
-  - /volume1/PhotoArchive:/data/PhotoArchive:ro
-  - /volume1/PhotoArchive/works.db:/data/PhotoArchive/works.db
-  - /volume1/PhotoArchive/user_logs.db:/data/PhotoArchive/user_logs.db
+  # Change the first part to your actual NAS path
+  - /volume1/Works/00_PhotoArchive:/data/PhotoArchive:rw
 ```
 
 ### 4. Build and run with Docker Compose
@@ -130,4 +139,8 @@ ports:
 | `PHOTO_ARCHIVE_PATH` | Path to photo archive inside container | Yes |
 | `JWT_SECRET` | Secret for JWT tokens | Yes |
 | `VITE_GOOGLE_CLIENT_ID` | Google OAuth client ID | Yes |
+| `DB_HOST` | MySQL Host IP (Use NAS IP, not localhost) | Yes |
+| `DB_USER` | MySQL User | Yes |
+| `DB_PASSWORD` | MySQL Password | Yes |
+| `DB_NAME` | Database Name | Yes |
 | `NODE_ENV` | Set to `production` | Yes |

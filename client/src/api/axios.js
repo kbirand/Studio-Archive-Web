@@ -19,7 +19,14 @@ api.interceptors.request.use((config) => {
 });
 
 api.interceptors.response.use(
-    (response) => response,
+    (response) => {
+        // Log Server-Timing if present for easier debugging
+        const timing = response.headers['server-timing'];
+        if (timing) {
+            console.log(`[Server-Timing] ${response.config.url}:`, timing);
+        }
+        return response;
+    },
     (error) => {
         if (error.response?.status === 401) {
             localStorage.removeItem('session_token');

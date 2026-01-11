@@ -27,23 +27,18 @@ router.post('/google', async (req, res) => {
         const email = payload.email;
 
         // 2. Find or Create User in DB
-        let user = db.prepare('SELECT * FROM users WHERE google_id = ?').get(googleId);
+        let user = await db.get('SELECT * FROM users WHERE google_id = ?', [googleId]);
 
         if (!user) {
             // Fallback: Check if user exists by email (legacy mapping) or username?
-            // Original app used usernames. For now, we might create a new user or try to link if we knew the email.
-            // Let's assume we create a NEW user pending approval if they don't exist.
-            // OR better: check if there is a legacy user with this email? 
-            // Since original schema didn't have email, we can't link easily unless username == email part.
-
-            user = db.prepare('SELECT * FROM users WHERE username = ?').get(email);
+            user = await db.get('SELECT * FROM users WHERE username = ?', [email]);
 
             if (user) {
                 // Link existing user & update picture
-                db.prepare('UPDATE users SET google_id = ?, email = ?, picture = ? WHERE id = ?').run(googleId, email, payload.picture, user.id);
+                await db.run('UPDATE users SET google_id = ?, email = ?, picture = ? WHERE id = ?', [googleId, email, payload.picture, user.id]);
             } else {
                 // Create new "pending" user
-                const info = db.prepare('INSERT INTO users (username, email, google_id, level, approved, picture, preferences) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+                const info = await db.run('INSERT INTO users (username, email, google_id, level, approved, picture, preferences) VALUES (?, ?, ?, ?, ?, ?, ?)', [
                     payload.name || email, // Use name if available
                     email,
                     googleId,
@@ -51,8 +46,8 @@ router.post('/google', async (req, res) => {
                     0, // Not approved by default
                     payload.picture,
                     '{}' // Default empty JSON object for preferences
-                );
-                user = db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid);
+                ]);
+                user = await db.get('SELECT * FROM users WHERE id = ?', [info.lastInsertRowid]);
                 // Log: NEW USER REGISTERED
                 logEvent(req, 'USER REGISTER', `New user registered: ${email}`, user);
             }
@@ -66,7 +61,7 @@ router.post('/google', async (req, res) => {
 
         // ALWAYS refresh the picture from Google
         if (payload.picture) {
-            db.prepare('UPDATE users SET picture = ? WHERE id = ?').run(payload.picture, user.id);
+            await db.run('UPDATE users SET picture = ? WHERE id = ?', [payload.picture, user.id]);
             user.picture = payload.picture; // Update local object
         }
 
@@ -111,7 +106,7 @@ router.get('/me', async (req, res) => {
 
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
-        const user = db.prepare('SELECT id, username, email, level, picture, approved, preferences FROM users WHERE id = ?').get(decoded.userId);
+        const user = await db.get('SELECT id, username, email, level, picture, approved, preferences FROM users WHERE id = ?', [decoded.userId]);
 
         if (!user) return res.status(404).json({ error: "User not found" });
 
@@ -139,7 +134,7 @@ router.put('/preferences', async (req, res) => {
 
         const preferencesString = JSON.stringify(preferences);
 
-        db.prepare('UPDATE users SET preferences = ? WHERE id = ?').run(preferencesString, decoded.userId);
+        await db.run('UPDATE users SET preferences = ? WHERE id = ?', [preferencesString, decoded.userId]);
 
         res.json({ success: true, preferences });
     } catch (error) {
